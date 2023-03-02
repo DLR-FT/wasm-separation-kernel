@@ -1,4 +1,6 @@
 use anyhow::{anyhow, Result};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use wasmi::*;
 use wat;
 
@@ -21,12 +23,26 @@ fn main() -> Result<()> {
     let wasm = wat::parse_str(&wat)?;
     let module = Module::new(&engine, &mut &wasm[..])?;
 
+    let sampling_ports: Arc<Mutex<HashMap<i32, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+
     // All Wasm objects operate within the context of a `Store`.
     // Each `Store` has a type parameter to store host-specific data,
     // which in this case we are using `42` for.
     type HostState = u32;
     let mut store = Store::new(&engine, 42);
     store.add_fuel(5_500).unwrap(); // add some fuel
+
+    let write_sampling_port = Func::wrap(
+        &mut store,
+        |mut caller: Caller<'_, HostState>, port_id: i32, value: i32| {
+            caller.consume_fuel(1000).unwrap();
+            let v = sampling_ports
+                .lock()
+                .expect("lock poised")
+                .entry(port_id)
+                .or_insert(Default::default());
+        },
+    );
 
     let host_hello = Func::wrap(
         &mut store,
