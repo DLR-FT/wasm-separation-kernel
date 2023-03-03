@@ -2,4 +2,9 @@
 
 members = [
     "linux_draft",
+    "partition-0",
+    "lwsk"
 ]
+
+[profile.release]
+lto = "fat"

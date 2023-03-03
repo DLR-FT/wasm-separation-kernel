@@ -1,13 +1,42 @@
 {
   description = "Flake utils demo";
-  inputs.flake-utils.url = "github:numtide/flake-utils";
+  inputs = {
+    flake-utils.url = "github:numtide/flake-utils";
+    fenix.url = "github:nix-community/fenix";
+    fenix.inputs.nixpkgs.follows = "nixpkgs";
+  };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, ... }@inputs:
     flake-utils.lib.eachDefaultSystem (system:
-      let pkgs = nixpkgs.legacyPackages.${system}; in
+      let
+        pkgs = nixpkgs.legacyPackages.${system};
+        fenix = inputs.fenix.packages.${system};
+
+        rust-release = "stable";
+        rust-targets = [
+          "x86_64-unknown-linux-gnu"
+          "x86_64-unknown-linux-musl"
+          "aarch64-unknown-linux-musl"
+          "wasm32-unknown-unknown"
+          "wasm32-wasi"
+        ];
+        toolchain = fenix.combine ([
+          fenix.${rust-release}.cargo
+          fenix.${rust-release}.clippy
+          fenix.${rust-release}.rustc
+          fenix.${rust-release}.rust-src
+        ] ++ (builtins.map
+          (target: fenix.targets.${target}.${rust-release}.rust-std)
+          rust-targets));
+      in
       rec {
         devShells.default = pkgs.mkShell {
-          nativeBuildInputs = with pkgs; [ cargo rustc rustfmt clippy ];
+          nativeBuildInputs = with pkgs; [
+            toolchain
+            fenix.rust-analyzer
+            fenix.latest.rustfmt
+            wabt
+          ];
         };
       }
     );

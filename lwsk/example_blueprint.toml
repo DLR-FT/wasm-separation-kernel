@@ -1,0 +1,19 @@
+### Data ports
+[ports]
+
+[ports.altitude]
+size = 4
+
+[ports.speed]
+size = 4
+
+
+### Runables
+[functions]
+
+[functions.partition-0]
+wasm = "../target/wasm32-unknown-unknown/release/partition_0.wasm"
+consumes = "altitude"
+produces = "altitude"
+
+### Time triggers?
