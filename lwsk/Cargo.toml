@@ -16,3 +16,8 @@ serde_toml = "0.0.1"
 toml = "0.7.2"
 wasmi = "0.28.0"
 wat = "1.0.60"
+
+
+[features]
+default = ["std"]
+std = []

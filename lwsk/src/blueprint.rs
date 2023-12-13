@@ -5,17 +5,21 @@ use std::{fs, io};
 use serde::{Deserialize, Serialize};
 
 use super::KernelConfig;
+use crate::EphemeralPartition;
 
+/// Base type of a configuration
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Blueprint {
-    functions: HashMap<String, Function>,
+    partitions: HashMap<String, EphemeralPartitionBp>,
     ports: HashMap<String, Port>,
+    // schedules: Vec<Schedule>,
+    io: HashMap<String, Io>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Function {
-    // The wasm module file
-    wasm: PathBuf,
+pub struct EphemeralPartitionBp {
+    // The WASM module file
+    wasm: String,
 
     // Port consumed by this function
     #[serde(default)]
@@ -25,17 +29,26 @@ pub struct Function {
     #[serde(default)]
     produces: Option<String>,
 
-    // add list of modules it needs to be linked with
-    #[serde(default)]
-    link_against: Vec<Function>,
+    /// Amount of fuel to provide per call
+    fuel_per_call: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Port {
-    // name of the port
-
     // size in byte of the port
     size: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum Io {
+    #[serde(alias = "UDP")]
+    Udp {
+        port: u16,
+        size: u32,
+        produces: String,
+        min_interval_ns: u64,
+    },
 }
 
 impl Blueprint {
@@ -46,14 +59,17 @@ impl Blueprint {
         Ok(bp)
     }
 
-    pub(crate) fn to_kernel_config(&self) -> KernelConfig {
+    pub fn to_kernel_config(&self) -> KernelConfig {
         let mut port_id_map: HashMap<&str, usize> = HashMap::with_capacity(self.ports.len());
+
+        debug!("initialializing ports");
         let kernel_ports = self
             .ports
             .iter()
             .enumerate()
             .map(|(idx, (name, bp_port))| {
                 port_id_map.insert(name, idx);
+                trace!("port {name:?} of {} bytes", bp_port.size);
                 super::KPort {
                     name: name.clone(),
                     buf: vec![0u8; bp_port.size as usize],
@@ -61,42 +77,50 @@ impl Blueprint {
             })
             .collect();
 
-        let kernel_functions = self
-            .functions
-            .iter()
-            .map(|(name, bp_func)| {
-                let (engine, mut store) = super::initialize_wasm();
-                let module =
-                    wasmi::Module::new(&engine, fs::File::open(&bp_func.wasm).unwrap()).unwrap();
-                let linker = <wasmi::Linker<()>>::new(&engine);
-                let instance = linker
-                    .instantiate(&mut store, &module)
-                    .unwrap()
-                    .start(&mut store)
-                    .unwrap();
+        debug!("loading ephemeral partitions");
+        let mut kernel_functions = Vec::new();
+        for (name, bp_func) in &self.partitions {
+            let Ok(mut ep) = EphemeralPartition::load(name, &bp_func.wasm) else {
+                warn!("error during initialization, skipping");
+                continue;
+            };
 
-                super::KFunction {
-                    name: name.clone(),
-                    consumes: bp_func
-                        .consumes
-                        .as_ref()
-                        .map(|name| port_id_map.get(name.as_str()).unwrap().to_owned())
-                        .to_owned(),
-                    produces: bp_func
-                        .produces
-                        .as_ref()
-                        .map(|name| port_id_map.get(name.as_str()).unwrap().to_owned()),
-                    _wasm_mod: module,
-                    instance,
-                    _engine: engine,
-                    store,
-                }
-            })
-            .collect();
+            ep.consumes = bp_func
+                .consumes
+                .as_ref()
+                .map(|name| port_id_map.get(name.as_str()).unwrap().to_owned())
+                .to_owned();
+
+            ep.produces = bp_func
+                .produces
+                .as_ref()
+                .map(|name| port_id_map.get(name.as_str()).unwrap().to_owned());
+
+            kernel_functions.push(ep);
+        }
 
         KernelConfig {
             ports: kernel_ports,
             functions: kernel_functions,
         }
     }
+}
+
+pub struct Schedule {
+    offset: u64,
+    triggers: String,
+}
+
+/// What to do with the linear memory of an interpreter when a timeout occured
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum OnTimeAbort {
+    /// Reset the linear memory to the initial state after loading the WASM
+    Reset,
+
+    /// Reset the linear memory to the value prior to the last function call in this interpreter
+    LastCheckPoint,
+
+    /// Keep the linear memory exactly as is.
+    /// Warning: this is dangerous, you must ensure that all state is checked before usage
+    Keep,
 }

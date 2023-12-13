@@ -9,11 +9,25 @@ size = 4
 
 
 ### Runables
-[functions]
+[partitions]
 
-[functions.partition-0]
-wasm = "../target/wasm32-unknown-unknown/release/partition_0.wasm"
+[partitions.partition-0]
+wasm = "../partition-0/target/wasm32-unknown-unknown/release/partition_0.wasm"
 consumes = "altitude"
 produces = "altitude"
+fuel_per_call = 35000
 
 ### Time triggers?
+# [[schedule]]
+# offset = 0
+# trigger = "partition-0"
+
+[io]
+
+
+[io.speed_in]
+type = "UDP"
+port = 10005
+size = 2048 # 2KiB
+produces = "speed"
+min_interval_ns = 1_000_000 # 1ms
