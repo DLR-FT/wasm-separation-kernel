@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::{fs, io};
 
 use serde::{Deserialize, Serialize};
 
 use super::KernelConfig;
-use crate::EphemeralPartition;
+use crate::{drivers, EphemeralPartition};
 
 /// Base type of a configuration
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,7 +45,7 @@ pub enum Io {
     #[serde(alias = "UDP")]
     Udp {
         port: u16,
-        size: u32,
+        // size: u32,
         produces: String,
         min_interval_ns: u64,
     },
@@ -97,6 +97,12 @@ impl Blueprint {
                 .map(|name| port_id_map.get(name.as_str()).unwrap().to_owned());
 
             kernel_functions.push(ep);
+        }
+
+        for (name, io) in &self.io {
+            match io {
+                Io::Udp { port, produces, .. } => drivers::UdpDriver::new(*port),
+            };
         }
 
         KernelConfig {

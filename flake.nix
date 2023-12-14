@@ -19,6 +19,7 @@
           "aarch64-unknown-linux-musl"
           "wasm32-unknown-unknown"
           "wasm32-wasi"
+          "thumbv6m-none-eabi"
         ];
         toolchain = fenix.combine ([
           fenix.${rust-release}.cargo
@@ -30,12 +31,33 @@
           rust-targets));
       in
       rec {
+        packages.lwsk =
+          let
+            lwskToml = builtins.fromTOML (builtins.readFile ./lwsk/Cargo.toml);
+          in
+          pkgs.rustPlatform.buildRustPackage {
+            pname = lwskToml.package.name;
+            version = lwskToml.package.version;
+            src = ./lwsk;
+            cargoLock = {
+              lockFile = ./lwsk/Cargo.lock;
+            };
+          };
+
+        packages.lwsk-no_std = packages.lwsk.overrideAttrs (_: { buildNoDefaultFeatures = true; });
+
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = with pkgs; [
             toolchain
             fenix.rust-analyzer
             fenix.latest.rustfmt
             wabt
+
+            # c example
+            meson
+            ninja
+            pkgsCross.wasi32.stdenv.cc
+            llvmPackages.lld
           ];
         };
       }
