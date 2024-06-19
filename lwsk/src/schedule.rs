@@ -49,7 +49,7 @@ impl Schedule {
         })
     }
 
-    pub fn next(&mut self) -> ScheduleEntry {
+    pub fn next_action(&mut self) -> ScheduleEntry {
         debug_assert!(
             !self.entry_sequence.is_empty(),
             "the schedule must never be empty"
@@ -64,6 +64,6 @@ impl Iterator for Schedule {
     type Item = ScheduleEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
-        Some(Self::next(self))
+        Some(Self::next_action(self))
     }
 }

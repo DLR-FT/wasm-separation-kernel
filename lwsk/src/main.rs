@@ -64,7 +64,7 @@ fn main() {
                 }
 
                 // call the function
-                let amount = 1500_000; // TODO adjust fuel stuff
+                let amount = 1_500_000; // TODO adjust fuel stuff
                 trace!("set fuel to {amount}");
                 f.store.set_fuel(amount).unwrap();
 

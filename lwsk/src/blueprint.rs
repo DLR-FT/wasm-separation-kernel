@@ -75,7 +75,7 @@ impl Blueprint {
                 trace!("port {name:?} of {} bytes", bp_port.size);
                 super::Channel {
                     name: name.clone(),
-                    buf: vec![0u8; bp_port.size as usize],
+                    buf: vec![0u8; bp_port.size],
                 }
             })
             .collect();
@@ -90,11 +90,11 @@ impl Blueprint {
                 continue;
             };
 
-            ep.consumes = bp_func
+            bp_func
                 .consumes
                 .as_ref()
                 .map(|name| port_id_map.get(name.as_str()).unwrap().to_owned())
-                .to_owned();
+                .clone_into(&mut ep.consumes);
 
             ep.produces = bp_func
                 .produces
@@ -122,7 +122,7 @@ impl Blueprint {
 
         debug!("assembling schedules");
         let mut kernel_schedules = Vec::new();
-        for (_schedule_name, bp_schedule) in &self.schedules {
+        for bp_schedule in self.schedules.values() {
             let mut kernel_schedule = Vec::new();
             for slot in bp_schedule {
                 kernel_schedule.push(match slot {

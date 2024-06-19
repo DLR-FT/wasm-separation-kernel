@@ -162,7 +162,7 @@ impl Function {
         let wasm_bytes = {
             let mut buf = Vec::new();
             if let Err(e) =
-                std::fs::File::open(&wasm_module_path).and_then(|mut f| f.read_to_end(&mut buf))
+                std::fs::File::open(wasm_module_path).and_then(|mut f| f.read_to_end(&mut buf))
             {
                 error!("could not open file {wasm_module_path:?}: {e}");
                 return Err(LwskError::WasmLoadError);
