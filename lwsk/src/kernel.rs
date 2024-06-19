@@ -1,53 +1,149 @@
+use std::io::Read;
+
+use crate::schedule::ScheduleEntry;
 use crate::LwskError;
 
 pub struct KernelConfig {
-    pub ports: Vec<KPort>,
-    pub functions: Vec<EphemeralPartition>,
-    // io: Vec<Udp>,
+    /// Communication channels which can be read from or written to by either functions or IO
+    /// drivers
+    pub channels: Vec<Channel>,
+
+    /// Available functions and their state
+    pub functions: Vec<Function>,
+
+    /// There can be multiple schedules, hence this is a [Vec] of [Vec]
+    pub schedules: Vec<Vec<ScheduleEntry>>,
+
+    /// IO driver which allow to connect external information sources and sinks to channels
+    pub io: Vec<Box<dyn crate::io::IoDriver>>,
 }
 
-pub struct KernelState {
-    // last_io_idx:
-}
+pub struct KernelState {}
 
-pub struct EphemeralPartition {
+/// A function as defined in the servereless idiom
+///
+/// Functions are characterized by having an actual entry function (as in a callable Wasm function),
+/// which is executed with a configured input data.
+pub struct Function {
+    /// Name of this function
     pub name: String,
-    /// idx of a port
+
+    /// Index of the port that this function consumes upon invocation, if any
     pub consumes: Option<usize>,
 
-    /// idx o a port it writes to
+    /// Index of the port that this function provides data to when terminating, if any
     pub produces: Option<usize>,
 
-    /// parsed wasm of this function
+    /// Parsed Wasm of this [Function]
     pub _wasm_mod: wasmi::Module,
 
+    /// Wasm engine of this [Function]
     pub _engine: wasmi::Engine,
 
+    /// Wasm store of this [Function]
     pub store: wasmi::Store<()>,
 
+    /// Wasm instance of this [Function]
     pub instance: wasmi::Instance,
 }
 
-pub struct KPort {
-    /// name of this port
+/// A place in memory to hold state
+///
+/// Channels allow information/state to be passed between Functions, or to/from IO drivers
+pub struct Channel {
+    /// Name of this port
     pub name: String,
 
-    /// buf backing up the data
+    /// Buffer backing up the data
     pub buf: Vec<u8>,
 }
 
 impl KernelConfig {
-    // fn pull_all_io(&mut self) {
-    //     for channel in self.io {
-    //         // channel.sample(self.ports[channel.target_port_idx]);
-    //     }
-    // }
+    /// Checks that the [KernelConfig] is valid
+    ///
+    /// # Checks
+    ///
+    /// - for each [Function], that ...
+    ///   - ... the index in consumes points to an existing channel, if any
+    ///   - ... the index in produeces points to an existing channel, if any
+    /// - for each [ScheduleEntry], that ...
+    ///   - ... it references an existing partition, if any
+    ///   - ... it references an existing channel, if any
+    ///   - ... it references an existing io, if any
+    pub fn validate(&self) -> Result<(), LwskError> {
+        for (function_idx, f) in self.functions.iter().enumerate() {
+            if let Some(channel_idx) = f.consumes {
+                debug!(
+                    "checking existance of {:?}/functions[{function_idx}].consumes AKA channels[{channel_idx}]",
+                    f.name
+                );
+                if self.channels.get(channel_idx).is_none() {
+                    error!("channels[{channel_idx}] does not exist");
+                    return Err(LwskError::InvalidChannelIdx(channel_idx));
+                }
+            }
+            if let Some(channel_idx) = f.produces {
+                debug!(
+                    "checking existance of {:?}/functions[{function_idx}].produces AKA channels[{channel_idx}]",
+                    f.name
+                );
+                if self.channels.get(channel_idx).is_none() {
+                    error!("channels[{channel_idx}] does not exist");
+                    return Err(LwskError::InvalidChannelIdx(channel_idx));
+                }
+            }
+            info!("validation complete, no errors");
+        }
 
-    // fn event_loop() {
-    //     loop {
-    //         // self.pull_all_io();
-    //     }
-    // }
+        for sched in &self.schedules {
+            for entry in sched {
+                match entry {
+                    ScheduleEntry::FunctionInvocation(function_idx) => {
+                        debug!("checking existance of functions[{function_idx}]");
+                        if self.functions.get(*function_idx).is_none() {
+                            error!("functions[{function_idx}] does not exist");
+                            return Err(LwskError::InvalidFunctionIdx(*function_idx));
+                        }
+                    }
+                    ScheduleEntry::IoIn {
+                        from_io_idx,
+                        to_channel_idx,
+                    } => {
+                        debug!("checking from io[{from_io_idx}] to channels[{to_channel_idx}] is possible");
+
+                        if self.io.get(*from_io_idx).is_none() {
+                            error!("io[{from_io_idx}] does not exist");
+                            return Err(LwskError::InvalidIoIdx(*from_io_idx));
+                        }
+
+                        if self.channels.get(*to_channel_idx).is_none() {
+                            error!("channels[{to_channel_idx}] does not exist");
+                            return Err(LwskError::InvalidChannelIdx(*to_channel_idx));
+                        }
+                    }
+                    ScheduleEntry::IoOut {
+                        from_channel_idx,
+                        to_io_idx,
+                    } => {
+                        debug!("checking from channel[{from_channel_idx}] to io[{to_io_idx}] is possible");
+
+                        if self.channels.get(*from_channel_idx).is_none() {
+                            error!("channel[{from_channel_idx}] does not exist");
+                            return Err(LwskError::InvalidChannelIdx(*from_channel_idx));
+                        }
+
+                        if self.io.get(*to_io_idx).is_none() {
+                            error!("io[{to_io_idx}] does not exist");
+                            return Err(LwskError::InvalidIoIdx(*to_io_idx));
+                        }
+                    }
+                    ScheduleEntry::Wait(_) => {}
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 pub fn initialize_wasm() -> (wasmi::Engine, wasmi::Store<()>) {
@@ -58,28 +154,31 @@ pub fn initialize_wasm() -> (wasmi::Engine, wasmi::Store<()>) {
     (engine, store)
 }
 
-impl EphemeralPartition {
+impl Function {
     pub fn load(name: &str, wasm_module_path: &str) -> Result<Self, LwskError> {
         trace!("loading partition {name:?} from {wasm_module_path:?}");
 
         #[cfg(feature = "std")]
-        let wasm_file = match std::fs::File::open(&wasm_module_path) {
-            Ok(file) => file,
-            Err(e) => {
+        let wasm_bytes = {
+            let mut buf = Vec::new();
+            if let Err(e) =
+                std::fs::File::open(&wasm_module_path).and_then(|mut f| f.read_to_end(&mut buf))
+            {
                 error!("could not open file {wasm_module_path:?}: {e}");
                 return Err(LwskError::WasmLoadError);
             }
+            buf
         };
 
         #[cfg(not(feature = "std"))]
-        let wasm_file = {
+        let wasm_bytes = {
             todo!("interprete the path as resource descriptor for a fit image or something, get a byte slice, be done with it")
         };
 
         let (engine, mut store) = super::initialize_wasm();
 
         trace!("parsing wasm file");
-        let module = match wasmi::Module::new(&engine, wasm_file) {
+        let module = match wasmi::Module::new(&engine, wasm_bytes.as_slice()) {
             Ok(module) => module,
             Err(e) => {
                 error!("could not load wasm module: {e}");
@@ -139,7 +238,7 @@ impl EphemeralPartition {
             })
     }
 
-    /// Get a shared ref to the memory backing a global in this partitions wasm module
+    /// Get a shared ref to the memory backing a global in this functions Wasm module
     pub fn get_global(&self, ident: &str, len: usize) -> Result<&[u8], LwskError> {
         let idx = self.get_global_idx(ident)? as usize;
 
@@ -167,7 +266,7 @@ impl EphemeralPartition {
         Ok(buf)
     }
 
-    /// Get a mutable ref to the data backing a global in this partitions wasm module
+    /// Get a mutable ref to the data backing a global in this functions Wasm module
     pub fn get_global_mut(&mut self, ident: &str, len: usize) -> Result<&mut [u8], LwskError> {
         let idx = self.get_global_idx(ident)? as usize;
 

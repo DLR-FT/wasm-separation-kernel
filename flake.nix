@@ -53,11 +53,10 @@
             fenix.latest.rustfmt
             wabt
 
-            # c example
-            meson
-            ninja
-            pkgsCross.wasi32.stdenv.cc
-            llvmPackages.lld
+            # ep in C
+            bear # can auto-generate a compile_commands.json
+            llvmPackages.clang-unwrapped # provides clang
+            llvmPackages.bintools-unwrapped # provides wasm-ld
           ];
         };
       }
