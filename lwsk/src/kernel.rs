@@ -92,7 +92,6 @@ impl KernelConfig {
                     return Err(LwskError::InvalidChannelIdx(channel_idx));
                 }
             }
-            info!("validation complete, no errors");
         }
 
         for sched in &self.schedules {
@@ -141,6 +140,7 @@ impl KernelConfig {
                 }
             }
         }
+        info!("validation complete, no errors");
 
         Ok(())
     }
