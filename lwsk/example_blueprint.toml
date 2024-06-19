@@ -18,7 +18,16 @@ produces = "altitude"
 fuel_per_call = 35000
 
 
+### IO Drivers
+[io]
 
+[io.speed_in]
+type = "UDP"
+bind = "0.0.0.0:4000"
+connect = "0.0.0.0:4001"
+
+
+### Sequence of actions
 [schedules]
 
 [[schedules.init]]
@@ -33,14 +42,3 @@ to_io = "speed_in"
 
 [[schedules.normal]]
 wait_ns = 1_000_000_000
-
-
-[io]
-
-[io.speed_in]
-type = "UDP"
-bind = "0.0.0.0:4000"
-connect = "0.0.0.0:4001"
-size = 2048 # 2KiB
-produces = "speed"
-min_interval_ns = 1_000_000 # 1ms
