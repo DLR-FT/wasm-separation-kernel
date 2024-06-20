@@ -1,8 +1,9 @@
+use core::time::Duration;
 use std::io::Read;
 
 use wasmi::TypedFunc;
 
-use crate::schedule::ScheduleEntry;
+use crate::schedule::{Schedule, ScheduleEntry};
 use crate::LwskError;
 
 pub const ENTRY_FUNCTION_NAME: &str = "process";
@@ -16,10 +17,13 @@ pub struct KernelConfig {
     pub functions: Vec<Function>,
 
     /// There can be multiple schedules, hence this is a [Vec] of [Vec]
-    pub schedules: Vec<Vec<ScheduleEntry>>,
+    pub schedules: Vec<Schedule>,
 
     /// IO driver which allow to connect external information sources and sinks to channels
     pub io: Vec<Box<dyn crate::io::IoDriver>>,
+
+    /// Index of the initial schedule
+    pub current_schedule_idx: usize,
 }
 
 pub struct KernelState {}
@@ -137,7 +141,7 @@ impl KernelConfig {
         }
 
         for sched in &self.schedules {
-            for entry in sched {
+            for entry in &sched.entry_sequence {
                 match entry {
                     ScheduleEntry::FunctionInvocation(function_idx) => {
                         // can not contain name of function, as we don't know function to exist
@@ -179,7 +183,18 @@ impl KernelConfig {
                             return Err(LwskError::InvalidIoIdx(*to_io_idx));
                         }
                     }
-                    ScheduleEntry::Wait(_) => {}
+                    ScheduleEntry::Wait(duration) => {
+                        if *duration > Duration::from_secs(10) {
+                            warn!("found a duration greater than 10 s, that might hurt real-time performance bad");
+                        }
+                    }
+                    ScheduleEntry::Schedule(schedule_idx) => {
+                        debug!("checking existance of schedules[{schedule_idx}]",);
+                        if sched.entry_sequence.get(*schedule_idx).is_none() {
+                            error!("schedules[{schedule_idx}] does not exist");
+                            return Err(LwskError::WasmLoadError);
+                        }
+                    }
                 }
             }
         }

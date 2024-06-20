@@ -23,6 +23,8 @@ pub enum LwskError {
 
     GlobalDoesNotExist,
 
+    EmptySchedule,
+
     // The specified memory was not found
     NoSuchWasmMemory,
 

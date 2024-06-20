@@ -33,24 +33,20 @@ fn main() {
     };
 
     info!("configuring kernel");
-    let mut kconfig = bp.to_kernel_config();
+    let mut kconfig = bp.to_kernel_config().unwrap();
     kconfig.validate().unwrap();
 
     if args.only_validate {
         return;
     }
 
-    let mut schedule_idx = 0;
-
-    let current_schedule = kconfig.schedules.get_mut(0).unwrap();
-
     info!("entering main loop");
     loop {
         // get next schedule entry
-        match current_schedule.get_mut(schedule_idx).unwrap() {
+        match kconfig.schedules[kconfig.current_schedule_idx].next_action() {
             ScheduleEntry::FunctionInvocation(function_idx) => {
                 // get the corresponding kernel function
-                let f = kconfig.functions.get_mut(*function_idx).unwrap(); // TODO justify unwrap
+                let f = kconfig.functions.get_mut(function_idx).unwrap(); // TODO justify unwrap
 
                 // set input if necessary
                 if let Some(channel_idx) = f.consumes {
@@ -134,8 +130,8 @@ fn main() {
                 to_channel_idx,
             } => {
                 trace!("pulling data from io[{from_io_idx}] to channels[{to_channel_idx}]");
-                let io_driver = &mut kconfig.io[*from_io_idx];
-                let memory = &mut kconfig.channels[*to_channel_idx].buf;
+                let io_driver = &mut kconfig.io[from_io_idx];
+                let memory = &mut kconfig.channels[to_channel_idx].buf;
 
                 // ignore io erros apart from logging
                 let _ = io_driver.pull(memory);
@@ -145,14 +141,23 @@ fn main() {
                 to_io_idx,
             } => {
                 trace!("pushing data from channels[{from_channel_idx}] to io[{to_io_idx}]");
-                let memory = &kconfig.channels[*from_channel_idx].buf;
+                let memory = &kconfig.channels[from_channel_idx].buf;
                 debug!("{:#?}", kconfig.io.len());
-                let io_driver = &mut kconfig.io[*to_io_idx];
+                let io_driver = &mut kconfig.io[to_io_idx];
                 // ignore io errors apart from logging
                 let _ = io_driver.push(memory);
             }
-            ScheduleEntry::Wait(duration) => std::thread::sleep(*duration),
+            ScheduleEntry::Wait(duration) => std::thread::sleep(duration),
+            ScheduleEntry::Schedule(new_schedule_idx) => {
+                debug!(
+                    "switch from schedule[{}] to schedule[{new_schedule_idx}]",
+                    kconfig.current_schedule_idx
+                );
+                // set the next schedule id
+                kconfig.current_schedule_idx = new_schedule_idx;
+                // reset the schedule to its start
+                kconfig.schedules[kconfig.current_schedule_idx].current_action = 0;
+            }
         }
-        schedule_idx = (schedule_idx + 1) % current_schedule.len();
     }
 }

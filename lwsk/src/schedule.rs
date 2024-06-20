@@ -1,7 +1,7 @@
 use crate::LwskError;
 
 /// What action to perform at this entry in the [Schedule]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScheduleEntry {
     /// Run a function
     FunctionInvocation(usize),
@@ -20,32 +20,39 @@ pub enum ScheduleEntry {
 
     /// Wait for a specified period of time
     Wait(core::time::Duration),
+
+    /// Switch to other schedule
+    Schedule(usize),
 }
 
 /// A schedule contains a fixed sequence of actions to perform
 pub struct Schedule {
+    /// Name of this schedule
+    pub name: String,
+
     /// Sequence of events
-    entry_sequence: Vec<ScheduleEntry>,
+    pub entry_sequence: Vec<ScheduleEntry>,
 
     /// Index to the event sequence
-    pub current_event: usize,
+    pub current_action: usize,
 }
 
 impl Schedule {
     /// Initialize a new Schedule
-    pub fn new<I: Into<Vec<ScheduleEntry>>>(entries: I) -> Result<Self, LwskError> {
+    pub fn new<I: Into<Vec<ScheduleEntry>>>(name: String, entries: I) -> Result<Self, LwskError> {
         let order = entries.into();
 
         // an empty schedule is wrong, as we guarantee to return an ScheduleEntry in ::next()
         if order.is_empty() {
-            return Err(LwskError::DriverError(0));
+            return Err(LwskError::EmptySchedule);
         }
 
         trace!("Current schedule: {:?}", order);
 
         Ok(Self {
+            name,
             entry_sequence: order,
-            current_event: 0,
+            current_action: 0,
         })
     }
 
@@ -55,8 +62,8 @@ impl Schedule {
             "the schedule must never be empty"
         );
 
-        self.current_event = self.current_event.wrapping_add(1) % self.entry_sequence.len();
-        self.entry_sequence[self.current_event].clone()
+        self.current_action = self.current_action.wrapping_add(1) % self.entry_sequence.len();
+        self.entry_sequence[self.current_action].clone()
     }
 }
 

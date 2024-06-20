@@ -1,19 +1,20 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::{fs, io};
 
 use serde::{Deserialize, Serialize};
 
 use super::KernelConfig;
-use crate::Function;
+use crate::schedule::Schedule;
+use crate::{Function, LwskError};
 
 /// Base type of a configuration
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Blueprint {
-    functions: HashMap<String, FunctionBp>,
-    channels: HashMap<String, ChannelBp>,
-    schedules: HashMap<String, Vec<ScheduleBp>>,
-    io: HashMap<String, IoBp>,
+    functions: BTreeMap<String, FunctionBp>,
+    channels: BTreeMap<String, ChannelBp>,
+    schedules: BTreeMap<String, Vec<ScheduleBp>>,
+    io: BTreeMap<String, IoBp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -46,6 +47,7 @@ pub enum ScheduleBp {
     IoOut { from_channel: String, to_io: String },
     IoIn { from_io: String, to_channel: String },
     Wait { wait_ns: u64 },
+    Schedule { switch_to_schedule: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -63,7 +65,7 @@ impl Blueprint {
         Ok(bp)
     }
 
-    pub fn to_kernel_config(&self) -> KernelConfig {
+    pub fn to_kernel_config(&self) -> Result<KernelConfig, LwskError> {
         debug!("initializing channels");
         let mut channel_id_map: HashMap<&str, usize> = HashMap::with_capacity(self.channels.len());
         let kernel_channels = self
@@ -123,11 +125,13 @@ impl Blueprint {
         }
 
         debug!("assembling schedules");
+        let mut schedules_id_map: HashMap<&str, usize> =
+            HashMap::with_capacity(self.schedules.len());
         let mut kernel_schedules = Vec::new();
-        for bp_schedule in self.schedules.values() {
-            let mut kernel_schedule = Vec::new();
+        for (name, bp_schedule) in &self.schedules {
+            let mut schedule_sequence = Vec::new();
             for slot in bp_schedule {
-                kernel_schedule.push(match slot {
+                schedule_sequence.push(match slot {
                     ScheduleBp::Function { function } => {
                         let idx = *function_id_map.get(function.as_str()).unwrap();
                         crate::schedule::ScheduleEntry::FunctionInvocation(idx)
@@ -157,19 +161,49 @@ impl Blueprint {
                     ScheduleBp::Wait { wait_ns } => crate::schedule::ScheduleEntry::Wait(
                         core::time::Duration::from_nanos(*wait_ns),
                     ),
+                    ScheduleBp::Schedule { .. } => {
+                        crate::schedule::ScheduleEntry::Schedule(usize::MAX)
+                    }
                 })
             }
-            kernel_schedules.push(kernel_schedule);
+            schedules_id_map.insert(name.as_str(), kernel_schedules.len());
+            kernel_schedules.push(Schedule::new(name.clone(), schedule_sequence)?);
         }
+
+        debug!("inserting schedule switch indices");
+
+        for (bp_schedule, kernel_schedule) in
+            self.schedules.values().zip(kernel_schedules.iter_mut())
+        {
+            for (bp_entry, kernel_entry) in bp_schedule
+                .iter()
+                .zip(kernel_schedule.entry_sequence.iter_mut())
+            {
+                if let ScheduleBp::Schedule { switch_to_schedule } = bp_entry {
+                    assert_eq!(
+                        *kernel_entry,
+                        crate::schedule::ScheduleEntry::Schedule(usize::MAX)
+                    );
+                    *kernel_entry = crate::schedule::ScheduleEntry::Schedule(
+                        *schedules_id_map.get(switch_to_schedule.as_str()).unwrap(),
+                    )
+                }
+            }
+        }
+
+        trace!(
+            "id mappings:\nchannels: {channel_id_map:#?}\nfunctions: {function_id_map:#?}\nio: {io_id_map:#?}\nschedules: {schedules_id_map:#?}"
+        );
 
         debug!("done deriving kernel config");
 
-        KernelConfig {
+        Ok(KernelConfig {
             channels: kernel_channels,
             functions: kernel_functions,
             schedules: kernel_schedules,
             io: kernel_io,
-        }
+            current_schedule_idx: 0, // the lexical first schedule by name is the initial schedule
+        })
     }
 }
 

@@ -30,15 +30,18 @@ connect = "127.0.0.1:4001"
 ### Sequence of actions
 [schedules]
 
-[[schedules.init]]
+[[schedules.01-init]]
 function = "partition-0"
 
-[[schedules.normal]]
+[[schedules.01-init]]
+switch_to_schedule = "10-normal"
+
+[[schedules.10-normal]]
 function = "partition-0"
 
-[[schedules.normal]]
+[[schedules.10-normal]]
 from_channel = "altitude"
 to_io = "speed_in"
 
-[[schedules.normal]]
+[[schedules.10-normal]]
 wait_ns = 1_000_000_000
