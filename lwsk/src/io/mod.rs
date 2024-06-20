@@ -1,10 +1,15 @@
 use crate::LwskError;
 
+/// Driver for IO
+///
 pub trait IoDriver {
-    // pull data from this port, if any
+    /// Pull data from this IO source, if any
+    ///
+    /// If this driver has no new data present since the last call to [pull], `buf` shall not be
+    /// changed.
     fn pull(&mut self, buf: &mut [u8]) -> Result<(), LwskError>;
 
-    // push data to this port
+    /// Push data to this IO sink
     fn push(&mut self, buf: &[u8]) -> Result<(), LwskError>;
 }
 

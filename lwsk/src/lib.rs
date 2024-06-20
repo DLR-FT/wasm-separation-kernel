@@ -41,3 +41,17 @@ impl From<std::io::Error> for LwskError {
         Self::IoChannelCreationError
     }
 }
+
+pub fn format_fuel_consumption(
+    fuel_consumed: u64,
+    duration: core::time::Duration,
+) -> (f32, &'static str) {
+    let duration_nanos = duration.as_nanos();
+
+    match (fuel_consumed, duration_nanos) {
+        _ => (
+            fuel_consumed as f32 / (duration.as_nanos() as f32 / 1e3),
+            "μs",
+        ),
+    }
+}

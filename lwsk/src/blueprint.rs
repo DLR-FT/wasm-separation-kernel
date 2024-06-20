@@ -10,47 +10,47 @@ use crate::Function;
 /// Base type of a configuration
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Blueprint {
-    functions: HashMap<String, EphemeralPartitionBp>,
-    channels: HashMap<String, Port>,
-    schedules: HashMap<String, Vec<Schedule>>,
-    io: HashMap<String, Io>,
+    functions: HashMap<String, FunctionBp>,
+    channels: HashMap<String, ChannelBp>,
+    schedules: HashMap<String, Vec<ScheduleBp>>,
+    io: HashMap<String, IoBp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EphemeralPartitionBp {
+pub struct FunctionBp {
     // The WASM module file
     wasm: String,
 
-    // Port consumed by this function
+    // Channel consumed by this function
     #[serde(default)]
     consumes: Option<String>,
 
-    // Port produced by this function
+    // Channel produced by this function
     #[serde(default)]
     produces: Option<String>,
 
     /// Amount of fuel to provide per call
-    fuel_per_call: usize,
+    fuel_per_call: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Port {
-    // size in byte of the port
+pub struct ChannelBp {
+    /// Size in byte of the channel
     size: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum Schedule {
-    Partition { partition: String },
-    IoOut { from_port: String, to_io: String },
-    IoIn { from_io: String, to_port: String },
+pub enum ScheduleBp {
+    Function { function: String },
+    IoOut { from_channel: String, to_io: String },
+    IoIn { from_io: String, to_channel: String },
     Wait { wait_ns: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum Io {
+pub enum IoBp {
     #[serde(alias = "UDP")]
     Udp { bind: String, connect: String },
 }
@@ -64,28 +64,28 @@ impl Blueprint {
     }
 
     pub fn to_kernel_config(&self) -> KernelConfig {
-        debug!("initializing ports");
-        let mut port_id_map: HashMap<&str, usize> = HashMap::with_capacity(self.channels.len());
-        let kernel_ports = self
+        debug!("initializing channels");
+        let mut channel_id_map: HashMap<&str, usize> = HashMap::with_capacity(self.channels.len());
+        let kernel_channels = self
             .channels
             .iter()
             .enumerate()
-            .map(|(idx, (name, bp_port))| {
-                port_id_map.insert(name, idx);
-                trace!("port {name:?} of {} bytes", bp_port.size);
+            .map(|(idx, (name, bp_channel))| {
+                channel_id_map.insert(name, idx);
+                trace!("{name:?}/channel[{idx}] size is {} bytes", bp_channel.size);
                 super::Channel {
                     name: name.clone(),
-                    buf: vec![0u8; bp_port.size],
+                    buf: vec![0u8; bp_channel.size],
                 }
             })
             .collect();
 
-        debug!("loading ephemeral partitions");
-        let mut partition_id_map: HashMap<&str, usize> =
+        debug!("loading Wasm function");
+        let mut function_id_map: HashMap<&str, usize> =
             HashMap::with_capacity(self.functions.len());
         let mut kernel_functions = Vec::new();
         for (name, bp_func) in &self.functions {
-            let Ok(mut ep) = Function::load(name, &bp_func.wasm) else {
+            let Ok(mut f) = Function::load(name, &bp_func.wasm) else {
                 warn!("error during initialization, skipping");
                 continue;
             };
@@ -93,17 +93,19 @@ impl Blueprint {
             bp_func
                 .consumes
                 .as_ref()
-                .map(|name| port_id_map.get(name.as_str()).unwrap().to_owned())
-                .clone_into(&mut ep.consumes);
+                .map(|name| channel_id_map.get(name.as_str()).unwrap().to_owned())
+                .clone_into(&mut f.consumes);
 
-            ep.produces = bp_func
+            f.produces = bp_func
                 .produces
                 .as_ref()
-                .map(|name| port_id_map.get(name.as_str()).unwrap().to_owned());
+                .map(|name| channel_id_map.get(name.as_str()).unwrap().to_owned());
 
-            kernel_functions.push(ep);
+            f.fuel_per_call = bp_func.fuel_per_call;
 
-            partition_id_map.insert(name, kernel_functions.len() - 1);
+            kernel_functions.push(f);
+
+            function_id_map.insert(name, kernel_functions.len() - 1);
         }
 
         debug!("initializing io drivers");
@@ -111,7 +113,7 @@ impl Blueprint {
         let mut kernel_io: Vec<Box<dyn crate::io::IoDriver>> = Vec::new();
         for (name, io) in &self.io {
             match io {
-                Io::Udp { bind, connect } => {
+                IoBp::Udp { bind, connect } => {
                     let driver = crate::io::udp::Udp::new(bind, connect).unwrap();
 
                     io_id_map.insert(name, kernel_io.len());
@@ -126,27 +128,33 @@ impl Blueprint {
             let mut kernel_schedule = Vec::new();
             for slot in bp_schedule {
                 kernel_schedule.push(match slot {
-                    Schedule::Partition { partition } => {
-                        let idx = *partition_id_map.get(partition.as_str()).unwrap();
+                    ScheduleBp::Function { function } => {
+                        let idx = *function_id_map.get(function.as_str()).unwrap();
                         crate::schedule::ScheduleEntry::FunctionInvocation(idx)
                     }
-                    Schedule::IoOut { from_port, to_io } => {
-                        let from_idx = *port_id_map.get(from_port.as_str()).unwrap();
+                    ScheduleBp::IoOut {
+                        from_channel,
+                        to_io,
+                    } => {
+                        let from_idx = *channel_id_map.get(from_channel.as_str()).unwrap();
                         let to_idx = *io_id_map.get(to_io.as_str()).unwrap();
                         crate::schedule::ScheduleEntry::IoOut {
                             from_channel_idx: from_idx,
                             to_io_idx: to_idx,
                         }
                     }
-                    Schedule::IoIn { from_io, to_port } => {
+                    ScheduleBp::IoIn {
+                        from_io,
+                        to_channel,
+                    } => {
                         let from_idx = *io_id_map.get(from_io.as_str()).unwrap();
-                        let to_idx = *port_id_map.get(to_port.as_str()).unwrap();
+                        let to_idx = *channel_id_map.get(to_channel.as_str()).unwrap();
                         crate::schedule::ScheduleEntry::IoOut {
                             from_channel_idx: from_idx,
                             to_io_idx: to_idx,
                         }
                     }
-                    Schedule::Wait { wait_ns } => crate::schedule::ScheduleEntry::Wait(
+                    ScheduleBp::Wait { wait_ns } => crate::schedule::ScheduleEntry::Wait(
                         core::time::Duration::from_nanos(*wait_ns),
                     ),
                 })
@@ -157,7 +165,7 @@ impl Blueprint {
         debug!("done deriving kernel config");
 
         KernelConfig {
-            channels: kernel_ports,
+            channels: kernel_channels,
             functions: kernel_functions,
             schedules: kernel_schedules,
             io: kernel_io,

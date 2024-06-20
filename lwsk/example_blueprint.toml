@@ -24,20 +24,20 @@ fuel_per_call = 35000
 [io.speed_in]
 type = "UDP"
 bind = "0.0.0.0:4000"
-connect = "0.0.0.0:4001"
+connect = "127.0.0.1:4001"
 
 
 ### Sequence of actions
 [schedules]
 
 [[schedules.init]]
-partition = "partition-0"
+function = "partition-0"
 
 [[schedules.normal]]
-partition = "partition-0"
+function = "partition-0"
 
 [[schedules.normal]]
-from_port = "altitude"
+from_channel = "altitude"
 to_io = "speed_in"
 
 [[schedules.normal]]

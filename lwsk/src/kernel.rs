@@ -1,7 +1,11 @@
 use std::io::Read;
 
+use wasmi::TypedFunc;
+
 use crate::schedule::ScheduleEntry;
 use crate::LwskError;
+
+pub const ENTRY_FUNCTION_NAME: &'static str = "process";
 
 pub struct KernelConfig {
     /// Communication channels which can be read from or written to by either functions or IO
@@ -28,10 +32,10 @@ pub struct Function {
     /// Name of this function
     pub name: String,
 
-    /// Index of the port that this function consumes upon invocation, if any
+    /// Index of the channel that this function consumes upon invocation, if any
     pub consumes: Option<usize>,
 
-    /// Index of the port that this function provides data to when terminating, if any
+    /// Index of the channel that this function provides data to when terminating, if any
     pub produces: Option<usize>,
 
     /// Parsed Wasm of this [Function]
@@ -45,13 +49,16 @@ pub struct Function {
 
     /// Wasm instance of this [Function]
     pub instance: wasmi::Instance,
+
+    /// Upper limit of fuel available per call to this function
+    pub fuel_per_call: u64,
 }
 
 /// A place in memory to hold state
 ///
 /// Channels allow information/state to be passed between Functions, or to/from IO drivers
 pub struct Channel {
-    /// Name of this port
+    /// Name of this channel
     pub name: String,
 
     /// Buffer backing up the data
@@ -67,7 +74,7 @@ impl KernelConfig {
     ///   - ... the index in consumes points to an existing channel, if any
     ///   - ... the index in produeces points to an existing channel, if any
     /// - for each [ScheduleEntry], that ...
-    ///   - ... it references an existing partition, if any
+    ///   - ... it references an existing function, if any
     ///   - ... it references an existing channel, if any
     ///   - ... it references an existing io, if any
     pub fn validate(&self) -> Result<(), LwskError> {
@@ -81,6 +88,18 @@ impl KernelConfig {
                     error!("channels[{channel_idx}] does not exist");
                     return Err(LwskError::InvalidChannelIdx(channel_idx));
                 }
+
+                let global_name = "INPUT";
+                debug!(
+                    "checking existance of {:?}/functions[{function_idx}] {global_name:?} global",
+                    f.name
+                );
+                if f.get_global(global_name, self.channels[channel_idx].buf.len())
+                    .is_err()
+                {
+                    error!("{:?}/functions[{function_idx}] {global_name:?} global does not exist or is of wrong size", f.name);
+                    return Err(LwskError::WasmLoadError);
+                }
             }
             if let Some(channel_idx) = f.produces {
                 debug!(
@@ -91,6 +110,29 @@ impl KernelConfig {
                     error!("channels[{channel_idx}] does not exist");
                     return Err(LwskError::InvalidChannelIdx(channel_idx));
                 }
+
+                let global_name = "OUTPUT";
+                debug!(
+                    "checking existance of {:?}/functions[{function_idx}] {global_name:?} global",
+                    f.name
+                );
+                if f.get_global(global_name, self.channels[channel_idx].buf.len())
+                    .is_err()
+                {
+                    error!("{:?}/functions[{function_idx}] {global_name:?} global does not exist or is of wrong size", f.name);
+                    return Err(LwskError::WasmLoadError);
+                }
+            }
+
+            debug!(
+                    "checking existance of {:?}/functions[{function_idx}] entry function {ENTRY_FUNCTION_NAME:?}", f.name
+                    );
+            if f.get_entry_function().is_err() {
+                error!(
+                    "{:?}/functions[{function_idx}] has no valid entry function",
+                    f.name
+                );
+                return Err(LwskError::WasmLoadError);
             }
         }
 
@@ -98,6 +140,7 @@ impl KernelConfig {
             for entry in sched {
                 match entry {
                     ScheduleEntry::FunctionInvocation(function_idx) => {
+                        // can not contain name of function, as we don't know function to exist
                         debug!("checking existance of functions[{function_idx}]");
                         if self.functions.get(*function_idx).is_none() {
                             error!("functions[{function_idx}] does not exist");
@@ -154,9 +197,11 @@ pub fn initialize_wasm() -> (wasmi::Engine, wasmi::Store<()>) {
     (engine, store)
 }
 
+type EntryFunctionType = TypedFunc<(), i32>;
+
 impl Function {
     pub fn load(name: &str, wasm_module_path: &str) -> Result<Self, LwskError> {
-        trace!("loading partition {name:?} from {wasm_module_path:?}");
+        trace!("loading function {name:?} from {wasm_module_path:?}");
 
         #[cfg(feature = "std")]
         let wasm_bytes = {
@@ -214,10 +259,37 @@ impl Function {
             _engine: engine,
             store,
             instance: started_instance,
+            fuel_per_call: 0,
         })
     }
 
-    /// Get the index of a global inside this partitions wasm module
+    pub fn get_entry_function(&self) -> Result<EntryFunctionType, LwskError> {
+        use wasmi::errors::*;
+        self.instance
+            .get_typed_func::<(), i32>(&self.store, &ENTRY_FUNCTION_NAME)
+            .map_err(|e| match e.kind() {
+                ErrorKind::Func(FuncError::ExportedFuncNotFound) => {
+                    error!(
+                        "wasm function {ENTRY_FUNCTION_NAME:?} not found in {:?}",
+                        self.name
+                    );
+                    LwskError::WasmLoadError
+                }
+                ErrorKind::Func(FuncError::MismatchingParameterLen) => {
+                    error!(
+                        "wasm function {ENTRY_FUNCTION_NAME:?} of {:?} has mismatching type signature",
+                        self.name
+                    );
+                    LwskError::WasmLoadError
+                }
+                e => {
+                    error!("{e}");
+                    LwskError::WasmLoadError
+                }
+            })
+    }
+
+    /// Get the index of a global inside this function's wasm module
     pub fn get_global_idx(&self, ident: &str) -> Result<i32, LwskError> {
         self.instance
             .get_global(&self.store, ident)
