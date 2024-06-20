@@ -5,7 +5,7 @@ use wasmi::TypedFunc;
 use crate::schedule::ScheduleEntry;
 use crate::LwskError;
 
-pub const ENTRY_FUNCTION_NAME: &'static str = "process";
+pub const ENTRY_FUNCTION_NAME: &str = "process";
 
 pub struct KernelConfig {
     /// Communication channels which can be read from or written to by either functions or IO
@@ -266,7 +266,7 @@ impl Function {
     pub fn get_entry_function(&self) -> Result<EntryFunctionType, LwskError> {
         use wasmi::errors::*;
         self.instance
-            .get_typed_func::<(), i32>(&self.store, &ENTRY_FUNCTION_NAME)
+            .get_typed_func::<(), i32>(&self.store, ENTRY_FUNCTION_NAME)
             .map_err(|e| match e.kind() {
                 ErrorKind::Func(FuncError::ExportedFuncNotFound) => {
                     error!(

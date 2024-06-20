@@ -48,10 +48,8 @@ pub fn format_fuel_consumption(
 ) -> (f32, &'static str) {
     let duration_nanos = duration.as_nanos();
 
-    match (fuel_consumed, duration_nanos) {
-        _ => (
-            fuel_consumed as f32 / (duration.as_nanos() as f32 / 1e3),
-            "μs",
-        ),
-    }
+    (
+        fuel_consumed as f32 / (duration.as_nanos() as f32 / 1e3),
+        "μs",
+    )
 }
