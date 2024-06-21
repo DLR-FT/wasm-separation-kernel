@@ -162,7 +162,7 @@ impl Blueprint {
                         core::time::Duration::from_nanos(*wait_ns),
                     ),
                     ScheduleBp::Schedule { .. } => {
-                        crate::schedule::ScheduleEntry::Schedule(usize::MAX)
+                        crate::schedule::ScheduleEntry::SwitchSchedule(usize::MAX)
                     }
                 })
             }
@@ -175,16 +175,15 @@ impl Blueprint {
         for (bp_schedule, kernel_schedule) in
             self.schedules.values().zip(kernel_schedules.iter_mut())
         {
-            for (bp_entry, kernel_entry) in bp_schedule
-                .iter()
-                .zip(kernel_schedule.entry_sequence.iter_mut())
+            for (bp_entry, kernel_entry) in
+                bp_schedule.iter().zip(kernel_schedule.sequence.iter_mut())
             {
                 if let ScheduleBp::Schedule { switch_to_schedule } = bp_entry {
                     assert_eq!(
                         *kernel_entry,
-                        crate::schedule::ScheduleEntry::Schedule(usize::MAX)
+                        crate::schedule::ScheduleEntry::SwitchSchedule(usize::MAX)
                     );
-                    *kernel_entry = crate::schedule::ScheduleEntry::Schedule(
+                    *kernel_entry = crate::schedule::ScheduleEntry::SwitchSchedule(
                         *schedules_id_map.get(switch_to_schedule.as_str()).unwrap(),
                     )
                 }

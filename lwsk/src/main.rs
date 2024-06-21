@@ -46,7 +46,7 @@ fn main() {
         match kconfig.schedules[kconfig.current_schedule_idx].next_action() {
             ScheduleEntry::FunctionInvocation(function_idx) => {
                 // get the corresponding kernel function
-                let f = kconfig.functions.get_mut(function_idx).unwrap(); // TODO justify unwrap
+                let f = kconfig.functions.get_mut(function_idx).unwrap();
 
                 // set input if necessary
                 if let Some(channel_idx) = f.consumes {
@@ -78,7 +78,10 @@ fn main() {
                 let now = std::time::Instant::now();
 
                 // call the function
-                let result = process_data.call(&mut f.store, ()).unwrap();
+                let Ok(result) = process_data.call(&mut f.store, ()) else {
+                    warn!("{:?}/functions[{function_idx}] ran out of fuel", f.name);
+                    continue;
+                };
 
                 // time difference since before the call
                 let duration = now.elapsed();
@@ -105,7 +108,7 @@ fn main() {
                 // retrieve outputs if necessary
                 if let Some(channel_idx) = f.produces {
                     trace!(
-                        "copying {:?}/functions[{function_idx}].INPUT -> {:?}/channels[{channel_idx}]",
+                        "copying {:?}/functions[{function_idx}].OUTPUT -> {:?}/channels[{channel_idx}]",
                         f.name,
                         kconfig.channels[channel_idx].name,
                     );
@@ -142,13 +145,12 @@ fn main() {
             } => {
                 trace!("pushing data from channels[{from_channel_idx}] to io[{to_io_idx}]");
                 let memory = &kconfig.channels[from_channel_idx].buf;
-                debug!("{:#?}", kconfig.io.len());
                 let io_driver = &mut kconfig.io[to_io_idx];
                 // ignore io errors apart from logging
                 let _ = io_driver.push(memory);
             }
             ScheduleEntry::Wait(duration) => std::thread::sleep(duration),
-            ScheduleEntry::Schedule(new_schedule_idx) => {
+            ScheduleEntry::SwitchSchedule(new_schedule_idx) => {
                 debug!(
                     "switch from schedule[{}] to schedule[{new_schedule_idx}]",
                     kconfig.current_schedule_idx

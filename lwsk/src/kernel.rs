@@ -141,7 +141,7 @@ impl KernelConfig {
         }
 
         for sched in &self.schedules {
-            for entry in &sched.entry_sequence {
+            for entry in &sched.sequence {
                 match entry {
                     ScheduleEntry::FunctionInvocation(function_idx) => {
                         // can not contain name of function, as we don't know function to exist
@@ -188,9 +188,9 @@ impl KernelConfig {
                             warn!("found a duration greater than 10 s, that might hurt real-time performance bad");
                         }
                     }
-                    ScheduleEntry::Schedule(schedule_idx) => {
+                    ScheduleEntry::SwitchSchedule(schedule_idx) => {
                         debug!("checking existance of schedules[{schedule_idx}]",);
-                        if sched.entry_sequence.get(*schedule_idx).is_none() {
+                        if sched.sequence.get(*schedule_idx).is_none() {
                             error!("schedules[{schedule_idx}] does not exist");
                             return Err(LwskError::WasmLoadError);
                         }

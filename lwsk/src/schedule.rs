@@ -22,7 +22,7 @@ pub enum ScheduleEntry {
     Wait(core::time::Duration),
 
     /// Switch to other schedule
-    Schedule(usize),
+    SwitchSchedule(usize),
 }
 
 /// A schedule contains a fixed sequence of actions to perform
@@ -30,8 +30,8 @@ pub struct Schedule {
     /// Name of this schedule
     pub name: String,
 
-    /// Sequence of events
-    pub entry_sequence: Vec<ScheduleEntry>,
+    /// Sequence of actions
+    pub sequence: Vec<ScheduleEntry>,
 
     /// Index to the event sequence
     pub current_action: usize,
@@ -51,19 +51,19 @@ impl Schedule {
 
         Ok(Self {
             name,
-            entry_sequence: order,
+            sequence: order,
             current_action: 0,
         })
     }
 
     pub fn next_action(&mut self) -> ScheduleEntry {
         debug_assert!(
-            !self.entry_sequence.is_empty(),
+            !self.sequence.is_empty(),
             "the schedule must never be empty"
         );
 
-        self.current_action = self.current_action.wrapping_add(1) % self.entry_sequence.len();
-        self.entry_sequence[self.current_action].clone()
+        self.current_action = self.current_action.wrapping_add(1) % self.sequence.len();
+        self.sequence[self.current_action].clone()
     }
 }
 
