@@ -309,19 +309,17 @@ impl Function {
         self.instance
             .get_global(&self.store, ident)
             .ok_or(LwskError::GlobalDoesNotExist)
-            .map_err(|x| {
+            .inspect_err(|_| {
                 error!(
                     "could not find global {ident:?} in wasm module {:?}",
                     self.name
                 );
-                x
             })?
             .get(&self.store)
             .i32()
             .ok_or(LwskError::UnexpectedWasmType)
-            .map_err(|x| {
+            .inspect_err(|_| {
                 error!("global {ident:?} is not of type i32");
-                x
             })
     }
 
@@ -334,12 +332,11 @@ impl Function {
             .instance
             .get_memory(&self.store, mem_name)
             .ok_or(LwskError::NoSuchWasmMemory)
-            .map_err(|x| {
+            .inspect_err(|_| {
                 error!(
                     "no memory named {mem_name:?} was found in wasm module {:?}",
                     self.name
                 );
-                x
             })?;
         let buf = &memory.data(&self.store)[idx..(idx + len)];
 
@@ -362,12 +359,11 @@ impl Function {
             .instance
             .get_memory(&self.store, mem_name)
             .ok_or(LwskError::NoSuchWasmMemory)
-            .map_err(|x| {
+            .inspect_err(|_| {
                 error!(
                     "no memory named {mem_name:?} was found in wasm module {:?}",
                     self.name
                 );
-                x
             })?;
         let buf = &mut memory.data_mut(&mut self.store)[idx..(idx + len)];
 

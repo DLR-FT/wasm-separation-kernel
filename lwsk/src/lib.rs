@@ -61,8 +61,6 @@ pub fn format_fuel_consumption(
     fuel_consumed: u64,
     duration: core::time::Duration,
 ) -> (f32, &'static str) {
-    let duration_nanos = duration.as_nanos();
-
     (
         fuel_consumed as f32 / (duration.as_nanos() as f32 / 1e3),
         "μs",
