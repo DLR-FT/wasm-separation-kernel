@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::KernelConfig;
 use crate::schedule::Schedule;
-use crate::{Function, LwskError};
+use crate::{Function, LwskResult};
 
 /// Base type of a configuration
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,7 +65,8 @@ impl Blueprint {
         Ok(bp)
     }
 
-    pub fn to_kernel_config(&self) -> Result<KernelConfig, LwskError> {
+    // TODO split function & replace unwraps with results
+    pub fn to_kernel_config(&self) -> LwskResult<KernelConfig> {
         debug!("initializing channels");
         let mut channel_id_map: HashMap<&str, usize> = HashMap::with_capacity(self.channels.len());
         let kernel_channels = self
@@ -88,15 +89,15 @@ impl Blueprint {
         let mut kernel_functions = Vec::new();
         for (name, bp_func) in &self.functions {
             let Ok(mut f) = Function::load(name, &bp_func.wasm) else {
+                // TODO introduce strict mode which returns an error here
                 warn!("error during initialization, skipping");
                 continue;
             };
 
-            bp_func
+            f.consumes = bp_func
                 .consumes
                 .as_ref()
-                .map(|name| channel_id_map.get(name.as_str()).unwrap().to_owned())
-                .clone_into(&mut f.consumes);
+                .map(|name| channel_id_map.get(name.as_str()).unwrap().to_owned());
 
             f.produces = bp_func
                 .produces
@@ -107,6 +108,7 @@ impl Blueprint {
 
             kernel_functions.push(f);
 
+            // TODO this len function can be replaced by using enummerate
             function_id_map.insert(name, kernel_functions.len() - 1);
         }
 
@@ -131,6 +133,7 @@ impl Blueprint {
         for (name, bp_schedule) in &self.schedules {
             let mut schedule_sequence = Vec::new();
             for slot in bp_schedule {
+                // TODO maybe impl From<ScheduleBp> for ScheduleEntry
                 schedule_sequence.push(match slot {
                     ScheduleBp::Function { function } => {
                         let idx = *function_id_map.get(function.as_str()).unwrap();
@@ -179,6 +182,7 @@ impl Blueprint {
                 bp_schedule.iter().zip(kernel_schedule.sequence.iter_mut())
             {
                 if let ScheduleBp::Schedule { switch_to_schedule } = bp_entry {
+                    // TODO return a sensible error when kernel entry already has a schedule assigned
                     assert_eq!(
                         *kernel_entry,
                         crate::schedule::ScheduleEntry::SwitchSchedule(usize::MAX)
@@ -191,7 +195,11 @@ impl Blueprint {
         }
 
         trace!(
-            "id mappings:\nchannels: {channel_id_map:#?}\nfunctions: {function_id_map:#?}\nio: {io_id_map:#?}\nschedules: {schedules_id_map:#?}"
+            "id mappings:\n\
+            channels: {channel_id_map:#?}\n\
+            functions: {function_id_map:#?}\n\
+            io: {io_id_map:#?}\n\
+            schedules: {schedules_id_map:#?}"
         );
 
         debug!("done deriving kernel config");

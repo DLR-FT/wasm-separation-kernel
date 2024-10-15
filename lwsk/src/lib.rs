@@ -13,27 +13,40 @@ pub use kernel::*;
 #[macro_use]
 extern crate log;
 
-#[derive(Debug)]
+pub type LwskResult<T> = Result<T, LwskError>;
+
+// TODO impl Error texts
+#[derive(Debug, thiserror::Error)]
 pub enum LwskError {
+    #[error("TODO")]
     IoChannelCreationError,
 
+    #[error("TODO")]
     WasmLoadError,
 
+    #[error("TODO")]
     UnexpectedWasmType,
 
+    #[error("TODO")]
     GlobalDoesNotExist,
 
+    #[error("TODO")]
     EmptySchedule,
 
-    // The specified memory was not found
+    #[error("The specified memory was not found")]
     NoSuchWasmMemory,
 
+    #[error("The buffer is to small. Got {got}, expected at least {expected}")]
     BufferTooSmall { expected: usize, got: usize },
 
+    #[error("TODO")]
     DriverError(i64),
 
+    #[error("TODO")]
     InvalidFunctionIdx(usize),
+    #[error("TODO")]
     InvalidChannelIdx(usize),
+    #[error("TODO")]
     InvalidIoIdx(usize),
 }
 

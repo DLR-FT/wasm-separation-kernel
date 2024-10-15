@@ -12,4 +12,8 @@ pub struct Args {
     /// Just parse and validate the blueprint, terminate then
     #[clap(short, long)]
     pub only_validate: bool,
+
+    /// Require every wasm function to parse successfully
+    #[clap(short, long)]
+    pub strict: bool,
 }

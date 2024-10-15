@@ -1,5 +1,6 @@
 use crate::LwskError;
 
+// TODO do something similar to enum_dispatch
 /// What action to perform at this entry in the [Schedule]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScheduleEntry {
